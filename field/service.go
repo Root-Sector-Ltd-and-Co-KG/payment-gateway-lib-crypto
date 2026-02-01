@@ -104,95 +104,12 @@ func generateSearchHash(value string, searchKey []byte) string {
 	return base64.StdEncoding.EncodeToString(h.Sum(nil))
 }
 
-// Helper functions to extract info from context
-func extractFieldInfoFromContext(ctx context.Context) (collection, recordID, fieldName, fieldType string) {
-	if val, ok := ctx.Value(audit.KeyCollection).(string); ok {
-		collection = val
-	}
-	if val, ok := ctx.Value(audit.KeyRecordID).(string); ok {
-		recordID = val
-	}
-	if val, ok := ctx.Value(audit.KeyFieldName).(string); ok {
-		fieldName = val
-	}
-	if val, ok := ctx.Value(audit.KeyFieldType).(string); ok {
-		fieldType = val
-	}
-	return
-}
-
-func extractUserInfoFromContext(ctx context.Context) (email, userID, orgID, operation string) {
-	if val, ok := ctx.Value(audit.KeyUserEmail).(string); ok {
-		email = val
-	}
-	if val, ok := ctx.Value(audit.KeyUserID).(string); ok {
-		userID = val
-	}
-	if val, ok := ctx.Value(audit.KeyOrgID).(string); ok {
-		orgID = val
-	}
-	if val, ok := ctx.Value(audit.KeyOperation).(string); ok {
-		operation = val
-	}
-	return
-}
-
-// createAuditEvent creates an audit event with proper context
-func (s *fieldService) createAuditEvent(ctx context.Context, field *types.FieldEncrypted, eventType, operation string) *types.AuditEvent {
-	event := audit.NewAuditEvent(eventType, operation, int(field.Version))
-
-	// Extract context information
-	collection, recordID, fieldName, fieldType := extractFieldInfoFromContext(ctx)
-	email, userID, orgID, op := extractUserInfoFromContext(ctx)
-
-	// Add context information
-	if collection != "" {
-		event.Context[string(audit.KeyCollection)] = collection
-	}
-	if recordID != "" {
-		event.Context[string(audit.KeyRecordID)] = recordID
-	}
-	if fieldName != "" {
-		event.Context[string(audit.KeyFieldName)] = fieldName
-	}
-	if fieldType != "" {
-		event.Context[string(audit.KeyFieldType)] = fieldType
-	}
-	if email != "" {
-		event.Context[string(audit.KeyUserEmail)] = email
-	}
-	if userID != "" {
-		event.Context[string(audit.KeyUserID)] = userID
-	}
-	if orgID != "" {
-		event.Context[string(audit.KeyOrgID)] = orgID
-	}
-	if op != "" {
-		event.Context[string(audit.KeyOperation)] = op
-	}
-
-	// Add scope information extracted from context
-	scope, scopeID := getScopeAndIDFromContext(ctx) // Use package-level helper
-	event.Context[string(audit.KeyScope)] = scope
-	if scopeID != "" {
-		// Add appropriate ID based on scope
-		if scope == "organization" {
-			event.Context[string(audit.KeyOrgID)] = scopeID
-		} else if scope == "user" { // Assuming "user" scope might exist
-			event.Context[string(audit.KeyUserID)] = scopeID
-		}
-		// Add other scope ID keys if necessary
-	}
-
-	return event
-}
-
 // buildAAD constructs the Additional Authenticated Data (AAD) string
 // using the full context: scope, id, collection, fieldName, and version.
 func (s *fieldService) buildAAD(ctx context.Context, version uint32) ([]byte, error) {
 	// Extract scope, scopeID, collection, and fieldName from context using helpers
-	scope, scopeID := getScopeAndIDFromContext(ctx)                 // Use package-level helper
-	collection, _, fieldName, _ := extractFieldInfoFromContext(ctx) // Use existing helper
+	scope, scopeID := GetScopeAndIDFromContext(ctx)
+	collection, _, fieldName, _ := ExtractFieldInfoFromContext(ctx)
 
 	// Log extracted/passed values for debugging AAD issues
 	log.Trace().
@@ -204,22 +121,17 @@ func (s *fieldService) buildAAD(ctx context.Context, version uint32) ([]byte, er
 		Msg("Building AAD with extracted context")
 
 	// Validate that we extracted necessary context
-	// Note: collectionName and fieldName are passed explicitly, so primarily check scope/scopeID
-	if scope == "unknown" || collection == "unknown" || fieldName == "unknown" || (scope == "organization" && scopeID == "") { // Added check for org scopeID
+	if scope == "unknown" || collection == "unknown" || fieldName == "unknown" || (scope == "organization" && scopeID == "") {
 		log.Error().
 			Str("scope", scope).
-			Str("scopeID", scopeID). // Use extracted scopeID
+			Str("scopeID", scopeID).
 			Str("extractedCollection", collection).
 			Str("extractedFieldName", fieldName).
 			Uint32("version", version).
-			Msgf("Failed to build AAD: Missing required context (scope=%s, scopeID=%s, collection=%s, fieldName=%s) for AAD construction", scope, scopeID, collection, fieldName) // Use Msgf for formatting
+			Msgf("Failed to build AAD: Missing required context (scope=%s, scopeID=%s, collection=%s, fieldName=%s) for AAD construction", scope, scopeID, collection, fieldName)
 		return nil, fmt.Errorf("missing required context (scope=%s, scopeID=%s, collection=%s, fieldName=%s) for AAD construction", scope, scopeID, collection, fieldName)
 	}
 
-	// Validate that we extracted necessary context
-	// Allow "unknown" only if explicitly permitted by configuration or design (currently enforcing)
-	// Construct AAD string using a consistent format (key=value, sorted keys recommended)
-	// Use extracted scope and scopeID
 	aadString := fmt.Sprintf("collection=%s:field=%s:id=%s:scope=%s:v=%d",
 		collection, fieldName, scopeID, scope, version)
 
@@ -234,7 +146,7 @@ func (s *fieldService) Encrypt(ctx context.Context, field *types.FieldEncrypted)
 	}
 
 	// Create audit event
-	auditEvent := s.createAuditEvent(ctx, field, audit.EventTypeFieldEncrypt, audit.OperationEncrypt)
+	auditEvent := CreateAuditEvent(ctx, field, audit.EventTypeFieldEncrypt, audit.OperationEncrypt)
 
 	// Always update timestamp
 	field.UpdatedAt = time.Now().UTC()
@@ -265,7 +177,7 @@ func (s *fieldService) Encrypt(ctx context.Context, field *types.FieldEncrypted)
 	}
 
 	// Get the current DEK status using scope/ID from context
-	scope, scopeID := getScopeAndIDFromContext(ctx) // Use package-level helper
+	scope, scopeID := GetScopeAndIDFromContext(ctx)
 	dekStatus, err := s.dekService.GetDEKStatus(ctx, scope, scopeID)
 	if err != nil {
 		if s.logger != nil {
@@ -391,7 +303,7 @@ func (s *fieldService) Decrypt(ctx context.Context, field *types.FieldEncrypted)
 	}
 
 	// Create audit event
-	auditEvent := s.createAuditEvent(ctx, field, audit.EventTypeFieldDecrypt, audit.OperationDecrypt)
+	auditEvent := CreateAuditEvent(ctx, field, audit.EventTypeFieldDecrypt, audit.OperationDecrypt)
 
 	// If there's no ciphertext, nothing to decrypt
 	if field.Ciphertext == "" {
@@ -426,7 +338,7 @@ func (s *fieldService) Decrypt(ctx context.Context, field *types.FieldEncrypted)
 	}
 
 	// Get DEK Info using scope/ID from context
-	scope, scopeID := getScopeAndIDFromContext(ctx) // Use package-level helper
+	scope, scopeID := GetScopeAndIDFromContext(ctx)
 	dekInfo, err := s.dekService.GetInfo(ctx, scope, scopeID)
 	if err != nil {
 		if s.logger != nil {
@@ -606,7 +518,7 @@ func (s *fieldService) EncryptSearchable(ctx context.Context, field *types.Field
 	}
 
 	// Create audit event
-	auditEvent := s.createAuditEvent(ctx, field, audit.EventTypeFieldEncrypt, audit.OperationEncrypt)
+	auditEvent := CreateAuditEvent(ctx, field, audit.EventTypeFieldEncrypt, audit.OperationEncrypt)
 
 	// Always update timestamp
 	field.UpdatedAt = time.Now().UTC()
@@ -633,7 +545,7 @@ func (s *fieldService) EncryptSearchable(ctx context.Context, field *types.Field
 	}
 
 	// Get DEK status using scope/ID from context
-	scope, scopeID := getScopeAndIDFromContext(ctx)
+	scope, scopeID := GetScopeAndIDFromContext(ctx)
 	systemStatus, err := s.dekService.GetDEKStatus(ctx, scope, scopeID)
 	if err != nil {
 		if s.logger != nil {
@@ -786,7 +698,7 @@ func (s *fieldService) Verify(ctx context.Context, field *types.FieldEncrypted) 
 	}
 
 	// Create audit event
-	event := s.createAuditEvent(ctx, field, "verify", "field_verify")
+	event := CreateAuditEvent(ctx, field, "verify", "field_verify")
 
 	// Log start event
 	if err := s.logger.LogEvent(ctx, event); err != nil {
@@ -814,7 +726,7 @@ func (s *fieldService) Verify(ctx context.Context, field *types.FieldEncrypted) 
 	}
 
 	// Get DEK Info using scope/ID from context
-	scope, scopeID := getScopeAndIDFromContext(ctx)
+	scope, scopeID := GetScopeAndIDFromContext(ctx)
 	dekInfo, err := s.dekService.GetInfo(ctx, scope, scopeID)
 	if err != nil {
 		return fmt.Errorf("failed to get DEK info for scope %s/%s: %w", scope, scopeID, err)
@@ -928,44 +840,11 @@ func (s *fieldService) ValidateAndCleanupEncryptedField(ctx context.Context, fie
 	}
 
 	// Use the validate function
-	if err := validateEncryptedField(ctx, field, validateFunc); err != nil {
+	if err := ValidateEncryptedField(ctx, field, validateFunc); err != nil {
 		return err
 	}
 
 	// Validation successful
-	return nil
-}
-
-// validateEncryptedField is a helper function to validate an encrypted field
-func validateEncryptedField(ctx context.Context, field *types.FieldEncrypted, decryptFunc func(context.Context, *types.FieldEncrypted) error) error {
-	if field == nil {
-		return fmt.Errorf("field is nil")
-	}
-
-	// If there's no ciphertext, nothing to validate
-	if field.Ciphertext == "" {
-		return fmt.Errorf("no ciphertext to validate")
-	}
-
-	// Store original plaintext for validation
-	originalPlaintext := field.Plaintext
-
-	// Try to decrypt the field
-	if err := decryptFunc(ctx, field); err != nil {
-		// Restore original plaintext since decryption failed
-		field.Plaintext = originalPlaintext
-		return fmt.Errorf("failed to decrypt field for validation: %w", err)
-	}
-
-	// Validate decrypted value matches original plaintext
-	if field.Plaintext != originalPlaintext {
-		// Restore original plaintext since validation failed
-		field.Plaintext = originalPlaintext
-		return fmt.Errorf("decrypted value does not match original plaintext")
-	}
-
-	// Clear plaintext after successful validation
-	field.Plaintext = ""
 	return nil
 }
 
@@ -977,27 +856,4 @@ func (s *fieldService) ValidateAndCleanupEncryptedFields(ctx context.Context, fi
 		}
 	}
 	return nil
-}
-
-// Helper to get scope and scopeID from context (package level)
-func getScopeAndIDFromContext(ctx context.Context) (scope string, scopeID string) {
-	scope = ""   // Default to empty, let buildAAD enforce presence
-	scopeID = "" // Default
-
-	if val := ctx.Value(audit.KeyScope); val != nil {
-		if str, ok := val.(string); ok && str != "" {
-			scope = str
-		}
-	}
-
-	// Extract OrgID specifically if scope is organization
-	if scope == "organization" {
-		if val := ctx.Value(audit.KeyOrgID); val != nil {
-			if str, ok := val.(string); ok && str != "" {
-				scopeID = str
-			}
-		}
-	}
-
-	return scope, scopeID
 }
