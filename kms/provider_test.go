@@ -256,12 +256,11 @@ func TestValidateGCPConfig(t *testing.T) {
 			errSubstr: "components in resource name cannot be empty",
 		},
 		{
-			name: "Missing Credentials",
+			name: "Missing Credentials (ADC mode)",
 			config: GCPConfig{
 				ResourceName: "projects/test-project/locations/global/keyRings/test-ring/cryptoKeys/test-key",
 			},
-			expectErr: true,
-			errSubstr: "GCP credentials (containing credentialsJson) are required",
+			expectErr: false, // nil Credentials map means ADC is expected
 		},
 		{
 			name: "Missing credentialsJson Key",
@@ -476,6 +475,16 @@ func TestNewProvider(t *testing.T) {
 			expectErr: false, // Expect no error *from NewProvider's initial checks*
 		},
 		{
+			name: "Valid GCP Provider (No Credentials - ADC)",
+			config: Config{
+				Type: encTypes.ProviderGCP,
+				GCP: &GCPConfig{
+					ResourceName: "projects/p/locations/l/keyRings/r/cryptoKeys/k",
+				},
+			},
+			expectErr: false, // Validation should pass; wrapper setup may still fail if ADC is unavailable
+		},
+		{
 			name: "Valid Vault Provider",
 			config: Config{
 				Type:  encTypes.ProviderVault,
@@ -489,7 +498,7 @@ func TestNewProvider(t *testing.T) {
 				Type: "unknown",
 			},
 			expectErr: true,
-			errSubstr: "unsupported provider type",
+			errSubstr: "unsupported KMS provider type",
 		},
 		{
 			name: "Missing AWS Config Struct",

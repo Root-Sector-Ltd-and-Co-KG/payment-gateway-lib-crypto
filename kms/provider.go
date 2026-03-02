@@ -260,19 +260,17 @@ func validateGCPConfig(gcpConfig GCPConfig) error {
 		return fmt.Errorf("project, location, keyRing, and cryptoKey components in resource name cannot be empty")
 	}
 
-	// Credentials check: Must have credentialsJson if Credentials map exists
-	// This is needed because we write it to a temp file for the library.
+	// Credentials are optional: when omitted, ADC is used.
+	// If a credentials map is provided, credentialsJson must be present and non-empty,
+	// because we write it to a temporary file for the wrapper library.
 	if gcpConfig.Credentials != nil {
 		credsJSON, ok := gcpConfig.Credentials["credentialsJson"].(string)
 		if !ok || credsJSON == "" {
 			return fmt.Errorf("credentialsJson is required in credentials map and cannot be empty")
 		}
 	} else {
-		// If credentials are not provided, ADC might still work if running on GCP infra or GOOGLE_APPLICATION_CREDENTIALS is set externally.
-		// However, for consistency and explicit configuration, we require it here.
-		// If ADC is the intended method, the Credentials map should be omitted entirely from the config.
-		// This validation enforces that *if* the Credentials map is present, credentialsJson must be inside.
-		// If the map is nil, we assume ADC is intended.
+		// If credentials are not provided, rely on Application Default Credentials
+		// (for example GOOGLE_APPLICATION_CREDENTIALS or workload identity).
 		log.Info().Msg("GCP credentials map not provided in config, assuming Application Default Credentials (ADC).")
 	}
 
