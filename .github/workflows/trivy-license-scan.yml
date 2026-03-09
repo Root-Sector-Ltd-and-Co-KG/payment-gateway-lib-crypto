@@ -1,0 +1,40 @@
+name: Trivy License Scan
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trivy-license-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  trivy-license:
+    name: Trivy License Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Run Trivy license scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: license
+          format: json
+          output: trivy-license-report.json
+          severity: UNKNOWN,HIGH,CRITICAL
+          exit-code: 1
+
+      - name: Upload license scan report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-license-report-${{ github.run_id }}
+          path: trivy-license-report.json
+          if-no-files-found: ignore

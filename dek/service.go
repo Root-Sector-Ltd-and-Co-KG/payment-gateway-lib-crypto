@@ -1127,16 +1127,24 @@ func (s *dekService) RotateDEK(ctx context.Context, scope string, orgID string, 
 	s.mu.Unlock() // Release lock after updating internal state
 	// --- End Critical section ---
 
-	// Clear cache
+	// Clear cache — delete both the DEK info key and the previous version's
+	// unwrapped DEK key so the stale plaintext key is not served after rotation.
 	if s.cache != nil {
-		cacheKey, err := s.getCacheKey(scope, orgID)
+		infoCacheKey, err := s.getCacheKey(scope, orgID)
 		if err == nil {
-			s.cache.Delete(cacheKey)
-			s.zLogger.Trace().
-				Str("cacheKey", cacheKey).
-				Msg("Cleared DEK cache after rotation")
+			s.cache.Delete(infoCacheKey)
+			s.zLogger.Trace().Str("cacheKey", infoCacheKey).Msg("Cleared DEK info cache after rotation")
 		} else {
-			s.zLogger.Warn().Err(err).Msg("Failed to generate cache key for clearing cache after rotation")
+			s.zLogger.Warn().Err(err).Msg("Failed to generate DEK info cache key for clearing after rotation")
+		}
+
+		// Also clear the previous active version's unwrapped DEK cache entry.
+		oldUnwrappedKey, keyErr := s.getUnwrappedCacheKey(ctx, currentVersion, scope, orgID)
+		if keyErr == nil {
+			s.cache.Delete(oldUnwrappedKey)
+			s.zLogger.Trace().Str("cacheKey", oldUnwrappedKey).Int("version", currentVersion).Msg("Cleared old unwrapped DEK cache after rotation")
+		} else {
+			s.zLogger.Warn().Err(keyErr).Int("version", currentVersion).Msg("Failed to generate old unwrapped DEK cache key for clearing after rotation")
 		}
 	}
 
@@ -1369,14 +1377,29 @@ func (s *dekService) InvalidateCache(ctx context.Context, scope string, scopeID 
 		// Continue to try and invalidate unwrapped keys if possible
 	}
 
-	// Invalidate unwrapped DEK cache (requires fetching DEK ID if not readily available)
-	// This is tricky as we might not have the DEK ID easily here.
-	// A simpler approach might be needed, or the cache keys need rethinking.
-	// For now, log a warning. A more robust solution might involve pattern deletion if the cache supports it.
-	// TODO: Implement robust unwrapped DEK cache invalidation if needed.
-	s.zLogger.Warn().Str("scope", scope).Str("scopeID", scopeID).Msg("Unwrapped DEK cache invalidation is not fully implemented yet")
+	// Invalidate all unwrapped DEK cache entries for this scope by fetching the
+	// DEK info from the store to enumerate all known versions, then deleting each
+	// versioned cache key. This ensures that a rotated or revoked DEK is not served
+	// from cache after invalidation.
+	dekInfo, storeErr := s.store.GetActiveDEK(ctx, scope, scopeID)
+	if storeErr == nil && dekInfo != nil {
+		clearedCount := 0
+		for _, v := range dekInfo.Versions {
+			unwrappedKey, keyErr := s.getUnwrappedCacheKey(ctx, v.Version, scope, scopeID)
+			if keyErr == nil {
+				s.cache.Delete(unwrappedKey)
+				clearedCount++
+				s.zLogger.Trace().Str("key", unwrappedKey).Msg("Deleted unwrapped DEK cache key")
+			} else {
+				s.zLogger.Warn().Err(keyErr).Int("version", v.Version).Str("scope", scope).Str("scopeID", scopeID).Msg("Failed to generate unwrapped cache key for version during invalidation")
+			}
+		}
+		s.zLogger.Debug().Int("versionsCleared", clearedCount).Str("scope", scope).Str("scopeID", scopeID).Msg("Cleared unwrapped DEK cache entries")
+	} else if storeErr != nil {
+		s.zLogger.Warn().Err(storeErr).Str("scope", scope).Str("scopeID", scopeID).Msg("Could not fetch DEK info to enumerate versions for cache invalidation; unwrapped DEK cache entries will expire via TTL")
+	}
 
-	return nil // Return nil for now, even if unwrapped invalidation is incomplete
+	return nil
 }
 
 // GetScopedFieldService returns a FieldService instance appropriate for the scope

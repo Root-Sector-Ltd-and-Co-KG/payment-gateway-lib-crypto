@@ -395,20 +395,8 @@ func (s *fieldService) Decrypt(ctx context.Context, field *types.FieldEncrypted)
 		return fmt.Errorf("failed to get DEK: %w", err)
 	}
 
-	// Decode base64 values
 	ciphertext, err := base64.StdEncoding.DecodeString(field.Ciphertext)
 	if err != nil {
-		// If we have plaintext, we can still proceed
-		if field.Plaintext != "" {
-			log.Warn().Err(err).Msg("Failed to decode ciphertext but plaintext available")
-			field.UpdatedAt = time.Now().UTC()
-			if s.logger != nil {
-				auditEvent.Status = audit.StatusSuccess
-				auditEvent.Context["reason"] = "decode_failed_has_plaintext"
-				s.logger.LogEvent(ctx, auditEvent)
-			}
-			return nil
-		}
 		if s.logger != nil {
 			auditEvent.Status = audit.StatusFailed
 			auditEvent.Context["error"] = fmt.Sprintf("failed_decode_ciphertext: %v", err)
@@ -419,17 +407,6 @@ func (s *fieldService) Decrypt(ctx context.Context, field *types.FieldEncrypted)
 
 	nonce, err := base64.StdEncoding.DecodeString(field.IV)
 	if err != nil {
-		// If we have plaintext, we can still proceed
-		if field.Plaintext != "" {
-			log.Warn().Err(err).Msg("Failed to decode IV but plaintext available")
-			field.UpdatedAt = time.Now().UTC()
-			if s.logger != nil {
-				auditEvent.Status = audit.StatusSuccess
-				auditEvent.Context["reason"] = "decode_iv_failed_has_plaintext"
-				s.logger.LogEvent(ctx, auditEvent)
-			}
-			return nil
-		}
 		if s.logger != nil {
 			auditEvent.Status = audit.StatusFailed
 			auditEvent.Context["error"] = fmt.Sprintf("failed_decode_iv: %v", err)
@@ -460,20 +437,8 @@ func (s *fieldService) Decrypt(ctx context.Context, field *types.FieldEncrypted)
 		return fmt.Errorf("failed to create GCM: %w", gcmErr)
 	}
 
-	// Decrypt the data
 	plaintextBytes, openErr := gcm.Open(nil, nonce, ciphertext, aad)
 	if openErr != nil {
-		// If we have plaintext, we can still proceed
-		if field.Plaintext != "" {
-			log.Warn().Err(openErr).Msg("Failed to decrypt data but plaintext available")
-			field.UpdatedAt = time.Now().UTC()
-			if s.logger != nil {
-				auditEvent.Status = audit.StatusSuccess
-				auditEvent.Context["reason"] = "decrypt_failed_has_plaintext"
-				s.logger.LogEvent(ctx, auditEvent)
-			}
-			return nil
-		}
 		if s.logger != nil {
 			auditEvent.Status = audit.StatusFailed
 			auditEvent.Context["error"] = fmt.Sprintf("failed_decrypt: %v", openErr)

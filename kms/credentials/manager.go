@@ -18,17 +18,17 @@ type credentialManager struct {
 	encryptor interfaces.SymmetricEncryptor
 }
 
-// NewManager creates a new credential manager
-func NewManager(encryptionKey []byte) interfaces.CredentialsManager {
+// NewManager creates a new credential manager. Returns an error if the
+// encryption key is invalid so callers do not receive a nil manager.
+func NewManager(encryptionKey []byte) (interfaces.CredentialsManager, error) {
 	encryptor, err := symmetric.NewEncryption(encryptionKey)
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to create encryptor")
-		return nil
+		return nil, fmt.Errorf("failed to create encryptor: %w", err)
 	}
 
 	return &credentialManager{
 		encryptor: encryptor,
-	}
+	}, nil
 }
 
 // EncryptCredentials encrypts KMS credentials based on provider type

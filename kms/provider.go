@@ -462,6 +462,14 @@ func createGCPWrapper(gcpConfig GCPConfig) (wrapping.Wrapper, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to create temporary credentials file: %w", err)
 		}
+		// Explicitly restrict permissions to owner-only read/write (0600).
+		// os.CreateTemp guarantees 0600 on Linux, but we set it explicitly as a
+		// defensive measure in case of platform differences or umask overrides.
+		if err := os.Chmod(tempFile.Name(), 0600); err != nil {
+			_ = tempFile.Close()
+			_ = os.Remove(tempFile.Name())
+			return nil, fmt.Errorf("failed to restrict permissions on temporary credentials file: %w", err)
+		}
 		// Ensure cleanup happens even if subsequent steps fail
 		defer func() {
 			errRemove := os.Remove(tempFile.Name())
