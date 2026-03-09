@@ -20,16 +20,18 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
 
+      - name: Set up Trivy
+        uses: aquasecurity/setup-trivy@v0.2.2
+
       - name: Run Trivy license scan
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          scan-type: fs
-          scan-ref: .
-          scanners: license
-          format: json
-          output: trivy-license-report.json
-          severity: UNKNOWN,HIGH,CRITICAL
-          exit-code: 1
+        run: |
+          trivy fs \
+            --scanners license \
+            --format json \
+            --severity UNKNOWN,HIGH,CRITICAL \
+            --exit-code 1 \
+            --output trivy-license-report.json \
+            .
 
       - name: Upload license scan report
         if: always()
