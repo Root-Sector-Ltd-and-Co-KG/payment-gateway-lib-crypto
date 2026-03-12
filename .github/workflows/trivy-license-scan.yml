@@ -35,7 +35,7 @@ jobs:
 
       - name: Upload license scan report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: trivy-license-report-${{ github.run_id }}
           path: trivy-license-report.json
