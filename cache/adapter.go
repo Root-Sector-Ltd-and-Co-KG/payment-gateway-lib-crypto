@@ -9,6 +9,7 @@ import (
 
 	"github.com/root-sector-ltd-and-co-kg/payment-gateway-lib-crypto/interfaces"
 	"github.com/root-sector-ltd-and-co-kg/payment-gateway-lib-crypto/types"
+	"github.com/rs/zerolog/log"
 )
 
 // CacheAdapter adapts the internal cache interface to the encryption cache interface.
@@ -52,11 +53,15 @@ func (a *CacheAdapter) IsEnabled() bool {
 // This is a best-effort operation that may not clear all entries if
 // pattern matching fails or if some deletions fail.
 func (a *CacheAdapter) Clear() {
-	// Best effort clear using pattern match
 	ctx := context.Background()
-	if keys, err := a.cache.Keys(ctx, "*"); err == nil {
-		for _, key := range keys {
-			_ = a.cache.Delete(ctx, key)
+	keys, err := a.cache.Keys(ctx, "*")
+	if err != nil {
+		log.Warn().Err(err).Str("op", "cache.Keys").Msg("encryption cache clear: list keys failed")
+		return
+	}
+	for _, key := range keys {
+		if delErr := a.cache.Delete(ctx, key); delErr != nil {
+			log.Warn().Err(delErr).Str("op", "cache.Delete").Msg("encryption cache clear: delete failed")
 		}
 	}
 }
@@ -100,7 +105,9 @@ func (a *CacheAdapter) Set(ctx context.Context, key string, value []byte, versio
 // Parameters:
 //   - key: The cache key to delete
 func (a *CacheAdapter) Delete(key string) {
-	_ = a.cache.Delete(context.Background(), key)
+	if err := a.cache.Delete(context.Background(), key); err != nil {
+		log.Warn().Err(err).Str("op", "cache.Delete").Msg("encryption cache delete failed")
+	}
 }
 
 // GetStats implements types.Cache.
