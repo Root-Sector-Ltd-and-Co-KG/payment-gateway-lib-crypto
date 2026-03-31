@@ -73,7 +73,7 @@ replace github.com/root-sector-ltd-and-co-kg/payment-gateway-lib-crypto => ../pa
 or `go.work` file in your root directory:
 
 ```go
-go 1.26.0
+go 1.26.1
 
 use (
 	./payment-gateway-lib-crypto
