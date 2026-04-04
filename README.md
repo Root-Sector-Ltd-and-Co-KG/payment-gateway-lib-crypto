@@ -85,7 +85,7 @@ use (
 Use the standard Go module dependency mechanism:
 
 ```go
-require github.com/root-sector-ltd-and-co-kg/payment-gateway-lib-crypto v1.0.1
+require github.com/root-sector-ltd-and-co-kg/payment-gateway-lib-crypto v1.0.27
 ```
 
 ## Directory Structure
