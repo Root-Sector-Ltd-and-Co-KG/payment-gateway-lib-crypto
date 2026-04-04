@@ -12,7 +12,7 @@ import (
 
 	wrapping "github.com/hashicorp/go-kms-wrapping/v2"     // Base v2 package
 	kmsaead "github.com/hashicorp/go-kms-wrapping/v2/aead" // AEAD wrapper
-	awskms "github.com/hashicorp/go-kms-wrapping/wrappers/awskms/v2"
+	awskms "github.com/hashicorp/go-kms-wrapping/wrappers/awskms/v4"
 	azurekeyvault "github.com/hashicorp/go-kms-wrapping/wrappers/azurekeyvault/v2"
 	gcpckms "github.com/hashicorp/go-kms-wrapping/wrappers/gcpckms/v2"
 	transit "github.com/hashicorp/go-kms-wrapping/wrappers/transit/v2"
