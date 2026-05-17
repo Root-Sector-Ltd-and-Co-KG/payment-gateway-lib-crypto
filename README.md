@@ -103,7 +103,7 @@ require github.com/root-sector-ltd-and-co-kg/payment-gateway-lib-crypto v1.0.27
 
 ## Dependencies
 
-The module requires Go 1.24.1 or later and includes the following major dependencies:
+The module requires Go 1.26.3 or later and includes the following major dependencies:
 
 - `github.com/hashicorp/go-kms-wrapping/v2`: Core KMS functionality
 - `github.com/rs/zerolog`: Structured logging
