@@ -34,17 +34,20 @@ func (f *FieldEncrypted) UnmarshalJSON(data []byte) error {
 	// First try to unmarshal as a simple string
 	var plainString string
 	if err := json.Unmarshal(data, &plainString); err == nil {
-		f.Plaintext = plainString
+		*f = FieldEncrypted{Plaintext: plainString}
 		return nil
 	}
 
-	// If not a string, try the full object format
-	type fieldAlias FieldEncrypted
-	var obj fieldAlias
+	// If not a string, accept only the public plaintext object shape.
+	// Storage metadata (ciphertext, IV, search hash, version, timestamps)
+	// must never be accepted from API JSON input.
+	var obj struct {
+		Plaintext string `json:"plaintext"`
+	}
 	if err := json.Unmarshal(data, &obj); err != nil {
 		return err
 	}
-	*f = FieldEncrypted(obj)
+	*f = FieldEncrypted{Plaintext: obj.Plaintext}
 	return nil
 }
 

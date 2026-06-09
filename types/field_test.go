@@ -33,8 +33,8 @@ func TestFieldEncrypted_MarshalJSON(t *testing.T) {
 			expected: `""`,
 		},
 		{
-			name: "marshals zero value field",
-			field: FieldEncrypted{},
+			name:     "marshals zero value field",
+			field:    FieldEncrypted{},
 			expected: `""`,
 		},
 	}
@@ -103,6 +103,41 @@ func TestFieldEncrypted_UnmarshalJSON(t *testing.T) {
 				t.Errorf("UnmarshalJSON Plaintext = %q, want %q", field.Plaintext, tt.expected)
 			}
 		})
+	}
+}
+
+func TestFieldEncrypted_UnmarshalJSONStripsStorageMetadata(t *testing.T) {
+	input := `{
+		"plaintext":"test@example.com",
+		"ciphertext":"attacker-ciphertext",
+		"iv":"attacker-iv",
+		"searchHash":"attacker-search-hash",
+		"version":99,
+		"updatedAt":"2026-01-02T03:04:05Z"
+	}`
+
+	var field FieldEncrypted
+	if err := json.Unmarshal([]byte(input), &field); err != nil {
+		t.Fatalf("UnmarshalJSON failed: %v", err)
+	}
+
+	if field.Plaintext != "test@example.com" {
+		t.Fatalf("Plaintext = %q, want %q", field.Plaintext, "test@example.com")
+	}
+	if field.Ciphertext != "" {
+		t.Errorf("Ciphertext should be stripped from JSON input, got %q", field.Ciphertext)
+	}
+	if field.IV != "" {
+		t.Errorf("IV should be stripped from JSON input, got %q", field.IV)
+	}
+	if field.SearchHash != "" {
+		t.Errorf("SearchHash should be stripped from JSON input, got %q", field.SearchHash)
+	}
+	if field.Version != 0 {
+		t.Errorf("Version should be stripped from JSON input, got %d", field.Version)
+	}
+	if !field.UpdatedAt.IsZero() {
+		t.Errorf("UpdatedAt should be stripped from JSON input, got %s", field.UpdatedAt)
 	}
 }
 
@@ -196,7 +231,7 @@ func TestFieldEncrypted_SecurityNoLeakage(t *testing.T) {
 	}
 
 	output := string(data)
-	
+
 	// Ensure no sensitive data leaks
 	if containsAny(output, []string{"SECRET_CIPHERTEXT", "SECRET_IV", "SECRET_HASH", "ciphertext", "iv", "searchHash"}) {
 		t.Errorf("JSON output contains sensitive data: %s", output)
