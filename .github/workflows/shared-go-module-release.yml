@@ -1,0 +1,54 @@
+name: Shared Go Module Release
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: "Commit SHA to tag and cascade"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shared-go-module-release-${{ github.repository }}-${{ github.event.pull_request.merge_commit_sha || github.event.inputs.source_sha }}
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    name: Dispatch shared module cascade
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve source SHA
+        id: source
+        shell: bash
+        run: |
+          SOURCE_SHA="${{ github.event.pull_request.merge_commit_sha || github.event.inputs.source_sha }}"
+          if [[ -z "$SOURCE_SHA" ]]; then
+            echo "::error::source SHA is required."
+            exit 1
+          fi
+          echo "sha=${SOURCE_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch release-orchestrator cascade
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo "::error::GH_PAT is required to dispatch shared module cascade."
+            exit 1
+          fi
+
+          gh api "repos/${{ github.repository_owner }}/payment-gateway-release-orchestrator/dispatches" \
+            --method POST \
+            -f event_type="shared-go-module-merged" \
+            -f client_payload[module]="lib-crypto" \
+            -f client_payload[repo]="${{ github.repository }}" \
+            -f client_payload[sourceSha]="${{ steps.source.outputs.sha }}" \
+            -F client_payload[pullRequest]="${{ github.event.pull_request.number || 0 }}"
