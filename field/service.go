@@ -139,6 +139,35 @@ func (s *fieldService) buildAAD(ctx context.Context, version uint32) ([]byte, er
 	return []byte(aadString), nil
 }
 
+func dekVersionToFieldVersion(version int) (uint32, error) {
+	if version <= 0 {
+		return 0, fmt.Errorf("invalid DEK version %d: must be positive", version)
+	}
+	if uint64(version) > uint64(^uint32(0)) {
+		return 0, fmt.Errorf("invalid DEK version %d: exceeds uint32", version)
+	}
+	return uint32(version), nil
+}
+
+func (s *fieldService) logAuditEvent(ctx context.Context, event *types.AuditEvent) bool {
+	if s == nil || s.logger == nil || event == nil {
+		return false
+	}
+	if event.Context == nil {
+		event.Context = map[string]string{}
+	}
+	if err := s.logger.LogEvent(ctx, event); err != nil {
+		s.zLogger.Warn().
+			Err(err).
+			Str("eventType", event.EventType).
+			Str("operation", event.Operation).
+			Str("status", event.Status).
+			Msg("Failed to log audit event")
+		return false
+	}
+	return true
+}
+
 // Encrypt encrypts a field value if encryption is enabled
 func (s *fieldService) Encrypt(ctx context.Context, field *types.FieldEncrypted) error {
 	if field == nil {
@@ -156,7 +185,7 @@ func (s *fieldService) Encrypt(ctx context.Context, field *types.FieldEncrypted)
 		if s.logger != nil {
 			auditEvent.Status = audit.StatusSuccess
 			auditEvent.Context["reason"] = "no_plaintext"
-			s.logger.LogEvent(ctx, auditEvent)
+			s.logAuditEvent(ctx, auditEvent)
 		}
 		return nil
 	}
@@ -171,7 +200,7 @@ func (s *fieldService) Encrypt(ctx context.Context, field *types.FieldEncrypted)
 		if s.logger != nil {
 			auditEvent.Status = audit.StatusSuccess
 			auditEvent.Context["reason"] = "encryption_disabled"
-			s.logger.LogEvent(ctx, auditEvent)
+			s.logAuditEvent(ctx, auditEvent)
 		}
 		return nil
 	}
@@ -183,7 +212,7 @@ func (s *fieldService) Encrypt(ctx context.Context, field *types.FieldEncrypted)
 		if s.logger != nil {
 			auditEvent.Status = audit.StatusFailed
 			auditEvent.Context["error"] = fmt.Sprintf("failed_get_dek_status: %v", err)
-			s.logger.LogEvent(ctx, auditEvent)
+			s.logAuditEvent(ctx, auditEvent)
 		}
 		return fmt.Errorf("failed to get DEK status for scope %s/%s: %w", scope, scopeID, err)
 	}
@@ -198,13 +227,21 @@ func (s *fieldService) Encrypt(ctx context.Context, field *types.FieldEncrypted)
 		if s.logger != nil {
 			auditEvent.Status = audit.StatusSuccess
 			auditEvent.Context["reason"] = "dek_not_active"
-			s.logger.LogEvent(ctx, auditEvent)
+			s.logAuditEvent(ctx, auditEvent)
 		}
 		return nil
 	}
 
 	// Set version from the current active DEK version
-	field.Version = uint32(dekStatus.Version)
+	fieldVersion, err := dekVersionToFieldVersion(dekStatus.Version)
+	if err != nil {
+		auditEvent.Status = audit.StatusFailed
+		auditEvent.DEKVersion = dekStatus.Version
+		auditEvent.Context["error"] = fmt.Sprintf("invalid_active_dek_version: %v", err)
+		s.logAuditEvent(ctx, auditEvent)
+		return fmt.Errorf("invalid active DEK version for scope %s/%s: %w", scope, scopeID, err)
+	}
+	field.Version = fieldVersion
 	auditEvent.DEKVersion = dekStatus.Version
 
 	// Additional authenticated data (AAD) includes version for integrity
@@ -215,7 +252,7 @@ func (s *fieldService) Encrypt(ctx context.Context, field *types.FieldEncrypted)
 		if s.logger != nil {
 			auditEvent.Status = audit.StatusFailed
 			auditEvent.Context["error"] = fmt.Sprintf("failed_build_aad: %v", err)
-			s.logger.LogEvent(ctx, auditEvent)
+			s.logAuditEvent(ctx, auditEvent)
 		}
 		return fmt.Errorf("failed to build AAD for encryption: %w", err)
 	}
@@ -226,7 +263,7 @@ func (s *fieldService) Encrypt(ctx context.Context, field *types.FieldEncrypted)
 		if s.logger != nil {
 			auditEvent.Status = audit.StatusFailed
 			auditEvent.Context["error"] = fmt.Sprintf("failed_get_active_dek: %v", dekErr)
-			s.logger.LogEvent(ctx, auditEvent)
+			s.logAuditEvent(ctx, auditEvent)
 		}
 		return fmt.Errorf("failed to get active DEK: %w", dekErr)
 	}
@@ -241,7 +278,7 @@ func (s *fieldService) Encrypt(ctx context.Context, field *types.FieldEncrypted)
 		if s.logger != nil {
 			auditEvent.Status = audit.StatusSuccess
 			auditEvent.Context["reason"] = "no_active_dek"
-			s.logger.LogEvent(ctx, auditEvent)
+			s.logAuditEvent(ctx, auditEvent)
 		}
 		return nil
 	}
@@ -252,7 +289,7 @@ func (s *fieldService) Encrypt(ctx context.Context, field *types.FieldEncrypted)
 		if s.logger != nil {
 			auditEvent.Status = audit.StatusFailed
 			auditEvent.Context["error"] = fmt.Sprintf("failed_create_cipher: %v", cipherErr)
-			s.logger.LogEvent(ctx, auditEvent)
+			s.logAuditEvent(ctx, auditEvent)
 		}
 		return fmt.Errorf("failed to create cipher: %w", cipherErr)
 	}
@@ -263,7 +300,7 @@ func (s *fieldService) Encrypt(ctx context.Context, field *types.FieldEncrypted)
 		if s.logger != nil {
 			auditEvent.Status = audit.StatusFailed
 			auditEvent.Context["error"] = fmt.Sprintf("failed_create_gcm: %v", gcmErr)
-			s.logger.LogEvent(ctx, auditEvent)
+			s.logAuditEvent(ctx, auditEvent)
 		}
 		return fmt.Errorf("failed to create GCM: %w", gcmErr)
 	}
@@ -274,7 +311,7 @@ func (s *fieldService) Encrypt(ctx context.Context, field *types.FieldEncrypted)
 		if s.logger != nil {
 			auditEvent.Status = audit.StatusFailed
 			auditEvent.Context["error"] = fmt.Sprintf("failed_generate_nonce: %v", nonceErr)
-			s.logger.LogEvent(ctx, auditEvent)
+			s.logAuditEvent(ctx, auditEvent)
 		}
 		return fmt.Errorf("failed to generate nonce: %w", nonceErr)
 	}
@@ -310,7 +347,7 @@ func (s *fieldService) Decrypt(ctx context.Context, field *types.FieldEncrypted)
 		if s.logger != nil {
 			auditEvent.Status = audit.StatusSuccess
 			auditEvent.Context["reason"] = "no_ciphertext"
-			s.logger.LogEvent(ctx, auditEvent)
+			s.logAuditEvent(ctx, auditEvent)
 		}
 		return nil
 	}
@@ -323,7 +360,7 @@ func (s *fieldService) Decrypt(ctx context.Context, field *types.FieldEncrypted)
 			if s.logger != nil {
 				auditEvent.Status = audit.StatusFailed
 				auditEvent.Context["error"] = "encryption_disabled_no_plaintext"
-				s.logger.LogEvent(ctx, auditEvent)
+				s.logAuditEvent(ctx, auditEvent)
 			}
 			return fmt.Errorf("cannot decrypt field: encryption is disabled and no plaintext available")
 		}
@@ -332,7 +369,7 @@ func (s *fieldService) Decrypt(ctx context.Context, field *types.FieldEncrypted)
 		if s.logger != nil {
 			auditEvent.Status = audit.StatusSuccess
 			auditEvent.Context["reason"] = "has_plaintext"
-			s.logger.LogEvent(ctx, auditEvent)
+			s.logAuditEvent(ctx, auditEvent)
 		}
 		return nil
 	}
@@ -344,7 +381,7 @@ func (s *fieldService) Decrypt(ctx context.Context, field *types.FieldEncrypted)
 		if s.logger != nil {
 			auditEvent.Status = audit.StatusFailed
 			auditEvent.Context["error"] = fmt.Sprintf("failed_get_dek_info: %v", err)
-			s.logger.LogEvent(ctx, auditEvent)
+			s.logAuditEvent(ctx, auditEvent)
 		}
 		return fmt.Errorf("failed to get DEK info for scope %s/%s: %w", scope, scopeID, err)
 	}
@@ -362,7 +399,7 @@ func (s *fieldService) Decrypt(ctx context.Context, field *types.FieldEncrypted)
 		if s.logger != nil {
 			auditEvent.Status = audit.StatusFailed
 			auditEvent.Context["error"] = fmt.Sprintf("dek_version_not_found: %d", field.Version)
-			s.logger.LogEvent(ctx, auditEvent)
+			s.logAuditEvent(ctx, auditEvent)
 		}
 		return fmt.Errorf("DEK version %d not found", field.Version)
 	}
@@ -375,7 +412,7 @@ func (s *fieldService) Decrypt(ctx context.Context, field *types.FieldEncrypted)
 		if s.logger != nil {
 			auditEvent.Status = audit.StatusFailed
 			auditEvent.Context["error"] = fmt.Sprintf("failed_build_aad: %v", err)
-			s.logger.LogEvent(ctx, auditEvent)
+			s.logAuditEvent(ctx, auditEvent)
 		}
 		return fmt.Errorf("failed to build AAD for decryption: %w", err)
 	}
@@ -387,7 +424,7 @@ func (s *fieldService) Decrypt(ctx context.Context, field *types.FieldEncrypted)
 			if auditEvent != nil {
 				auditEvent.Status = audit.StatusFailed
 				auditEvent.Context["error"] = fmt.Sprintf("failed_unwrap_dek: %v", err)
-				s.logger.LogEvent(ctx, auditEvent)
+				s.logAuditEvent(ctx, auditEvent)
 			} else {
 				s.zLogger.Error().Err(err).Str("scope", s.scope).Str("orgID", s.orgID).Msg("Audit event (auditEvent) was nil during DEK unwrap failure in Decrypt method")
 			}
@@ -400,7 +437,7 @@ func (s *fieldService) Decrypt(ctx context.Context, field *types.FieldEncrypted)
 		if s.logger != nil {
 			auditEvent.Status = audit.StatusFailed
 			auditEvent.Context["error"] = fmt.Sprintf("failed_decode_ciphertext: %v", err)
-			s.logger.LogEvent(ctx, auditEvent)
+			s.logAuditEvent(ctx, auditEvent)
 		}
 		return fmt.Errorf("failed to decode ciphertext: %w", err)
 	}
@@ -410,7 +447,7 @@ func (s *fieldService) Decrypt(ctx context.Context, field *types.FieldEncrypted)
 		if s.logger != nil {
 			auditEvent.Status = audit.StatusFailed
 			auditEvent.Context["error"] = fmt.Sprintf("failed_decode_iv: %v", err)
-			s.logger.LogEvent(ctx, auditEvent)
+			s.logAuditEvent(ctx, auditEvent)
 		}
 		return fmt.Errorf("failed to decode IV: %w", err)
 	}
@@ -421,7 +458,7 @@ func (s *fieldService) Decrypt(ctx context.Context, field *types.FieldEncrypted)
 		if s.logger != nil {
 			auditEvent.Status = audit.StatusFailed
 			auditEvent.Context["error"] = fmt.Sprintf("failed_create_cipher: %v", cipherErr)
-			s.logger.LogEvent(ctx, auditEvent)
+			s.logAuditEvent(ctx, auditEvent)
 		}
 		return fmt.Errorf("failed to create cipher: %w", cipherErr)
 	}
@@ -432,7 +469,7 @@ func (s *fieldService) Decrypt(ctx context.Context, field *types.FieldEncrypted)
 		if s.logger != nil {
 			auditEvent.Status = audit.StatusFailed
 			auditEvent.Context["error"] = fmt.Sprintf("failed_create_gcm: %v", gcmErr)
-			s.logger.LogEvent(ctx, auditEvent)
+			s.logAuditEvent(ctx, auditEvent)
 		}
 		return fmt.Errorf("failed to create GCM: %w", gcmErr)
 	}
@@ -442,7 +479,7 @@ func (s *fieldService) Decrypt(ctx context.Context, field *types.FieldEncrypted)
 		if s.logger != nil {
 			auditEvent.Status = audit.StatusFailed
 			auditEvent.Context["error"] = fmt.Sprintf("failed_decrypt: %v", openErr)
-			s.logger.LogEvent(ctx, auditEvent)
+			s.logAuditEvent(ctx, auditEvent)
 		}
 		return fmt.Errorf("failed to decrypt data: %w", openErr)
 	}
@@ -504,7 +541,7 @@ func (s *fieldService) EncryptSearchable(ctx context.Context, field *types.Field
 		if s.logger != nil {
 			auditEvent.Status = audit.StatusSuccess
 			auditEvent.Context["mode"] = "plaintext"
-			s.logger.LogEvent(ctx, auditEvent)
+			s.logAuditEvent(ctx, auditEvent)
 		}
 		return nil
 	}
@@ -516,7 +553,7 @@ func (s *fieldService) EncryptSearchable(ctx context.Context, field *types.Field
 		if s.logger != nil {
 			auditEvent.Status = audit.StatusFailed
 			auditEvent.Context["error"] = err.Error()
-			s.logger.LogEvent(ctx, auditEvent)
+			s.logAuditEvent(ctx, auditEvent)
 		}
 		return fmt.Errorf("failed to get DEK status for scope %s/%s: %w", scope, scopeID, err)
 	}
@@ -532,14 +569,22 @@ func (s *fieldService) EncryptSearchable(ctx context.Context, field *types.Field
 		if s.logger != nil {
 			auditEvent.Status = audit.StatusSuccess
 			auditEvent.Context["mode"] = "plaintext_no_dek"
-			s.logger.LogEvent(ctx, auditEvent)
+			s.logAuditEvent(ctx, auditEvent)
 		}
 
 		return nil
 	}
 
 	// Set the field version to the current DEK version
-	field.Version = uint32(systemStatus.Version)
+	fieldVersion, err := dekVersionToFieldVersion(systemStatus.Version)
+	if err != nil {
+		auditEvent.Status = audit.StatusFailed
+		auditEvent.DEKVersion = systemStatus.Version
+		auditEvent.Context["error"] = fmt.Sprintf("invalid_active_dek_version: %v", err)
+		s.logAuditEvent(ctx, auditEvent)
+		return fmt.Errorf("invalid active DEK version for scope %s/%s: %w", scope, scopeID, err)
+	}
+	field.Version = fieldVersion
 	auditEvent.DEKVersion = systemStatus.Version
 
 	// Additional authenticated data (AAD) includes version for integrity
@@ -550,7 +595,7 @@ func (s *fieldService) EncryptSearchable(ctx context.Context, field *types.Field
 		if s.logger != nil {
 			auditEvent.Status = audit.StatusFailed
 			auditEvent.Context["error"] = fmt.Sprintf("failed_build_aad: %v", err)
-			s.logger.LogEvent(ctx, auditEvent)
+			s.logAuditEvent(ctx, auditEvent)
 		}
 		return fmt.Errorf("failed to build AAD for searchable encryption: %w", err)
 	}
@@ -561,7 +606,7 @@ func (s *fieldService) EncryptSearchable(ctx context.Context, field *types.Field
 		if s.logger != nil {
 			auditEvent.Status = audit.StatusFailed
 			auditEvent.Context["error"] = fmt.Sprintf("failed_get_active_dek: %v", dekErr)
-			s.logger.LogEvent(ctx, auditEvent)
+			s.logAuditEvent(ctx, auditEvent)
 		}
 		return fmt.Errorf("failed to get active DEK: %w", dekErr)
 	}
@@ -572,7 +617,7 @@ func (s *fieldService) EncryptSearchable(ctx context.Context, field *types.Field
 		if s.logger != nil {
 			auditEvent.Status = audit.StatusFailed
 			auditEvent.Context["error"] = fmt.Sprintf("failed_create_cipher: %v", cipherErr)
-			s.logger.LogEvent(ctx, auditEvent)
+			s.logAuditEvent(ctx, auditEvent)
 		}
 		return fmt.Errorf("failed to create cipher: %w", cipherErr)
 	}
@@ -583,7 +628,7 @@ func (s *fieldService) EncryptSearchable(ctx context.Context, field *types.Field
 		if s.logger != nil {
 			auditEvent.Status = audit.StatusFailed
 			auditEvent.Context["error"] = fmt.Sprintf("failed_create_gcm: %v", gcmErr)
-			s.logger.LogEvent(ctx, auditEvent)
+			s.logAuditEvent(ctx, auditEvent)
 		}
 		return fmt.Errorf("failed to create GCM: %w", gcmErr)
 	}
@@ -594,7 +639,7 @@ func (s *fieldService) EncryptSearchable(ctx context.Context, field *types.Field
 		if s.logger != nil {
 			auditEvent.Status = audit.StatusFailed
 			auditEvent.Context["error"] = fmt.Sprintf("failed_generate_nonce: %v", nonceErr)
-			s.logger.LogEvent(ctx, auditEvent)
+			s.logAuditEvent(ctx, auditEvent)
 		}
 		return fmt.Errorf("failed to generate nonce: %w", nonceErr)
 	}
@@ -616,7 +661,7 @@ func (s *fieldService) EncryptSearchable(ctx context.Context, field *types.Field
 	// Log successful encryption
 	if s.logger != nil {
 		auditEvent.Status = audit.StatusSuccess
-		s.logger.LogEvent(ctx, auditEvent)
+		s.logAuditEvent(ctx, auditEvent)
 	}
 
 	return nil
@@ -666,17 +711,13 @@ func (s *fieldService) Verify(ctx context.Context, field *types.FieldEncrypted) 
 	event := CreateAuditEvent(ctx, field, "verify", "field_verify")
 
 	// Log start event
-	if err := s.logger.LogEvent(ctx, event); err != nil {
-		fmt.Printf("Failed to log audit event: %v\n", err)
-	}
+	s.logAuditEvent(ctx, event)
 
 	defer func() {
 		// Always update event status at the end
 		event.Status = "completed"
 		event.Timestamp = time.Now().UTC()
-		if err := s.logger.LogEvent(ctx, event); err != nil {
-			fmt.Printf("Failed to log audit event: %v\n", err)
-		}
+		s.logAuditEvent(ctx, event)
 	}()
 
 	// Check required fields
@@ -717,7 +758,7 @@ func (s *fieldService) Verify(ctx context.Context, field *types.FieldEncrypted) 
 			if event != nil {
 				event.Status = audit.StatusFailed
 				event.Context["error"] = fmt.Sprintf("failed_unwrap_dek: %v", err)
-				s.logger.LogEvent(ctx, event)
+				s.logAuditEvent(ctx, event)
 			} else {
 				s.zLogger.Error().Err(err).Str("scope", s.scope).Str("orgID", s.orgID).Msg("Audit event (event) was nil during DEK unwrap failure in Verify method")
 			}
@@ -763,7 +804,7 @@ func (s *fieldService) Verify(ctx context.Context, field *types.FieldEncrypted) 
 			if event != nil {
 				event.Status = audit.StatusFailed
 				event.Context["error"] = fmt.Sprintf("gcm_open_failed: %v", openErr)
-				s.logger.LogEvent(ctx, event)
+				s.logAuditEvent(ctx, event)
 			} else {
 				s.zLogger.Error().Err(openErr).Str("scope", s.scope).Str("orgID", s.orgID).Msg("Audit event (event) was nil during GCM open failure in Verify method")
 			}
