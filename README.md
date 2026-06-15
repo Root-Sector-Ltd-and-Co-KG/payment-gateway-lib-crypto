@@ -85,7 +85,7 @@ use (
 Use the standard Go module dependency mechanism:
 
 ```go
-require github.com/root-sector-ltd-and-co-kg/payment-gateway-lib-crypto v1.0.27
+require github.com/root-sector-ltd-and-co-kg/payment-gateway-lib-crypto v1.0.32
 ```
 
 ## Directory Structure
@@ -103,7 +103,7 @@ require github.com/root-sector-ltd-and-co-kg/payment-gateway-lib-crypto v1.0.27
 
 ## Dependencies
 
-The module requires Go 1.26.3 or later and includes the following major dependencies:
+The module requires Go 1.26.4 or later and includes the following major dependencies:
 
 - `github.com/hashicorp/go-kms-wrapping/v2`: Core KMS functionality
 - `github.com/rs/zerolog`: Structured logging
@@ -123,7 +123,7 @@ Make sure that:
 1. You've properly set up the `replace` directive in your `go.mod` for local development
 2. You've run `go mod tidy` to update dependencies
 3. The package name and path match the expected structure in this module
-4. You're using a compatible Go version (1.24.1 or later)
+4. You're using a compatible Go version (1.26.4 or later)
 
 ## Security Considerations
 
