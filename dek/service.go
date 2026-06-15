@@ -295,9 +295,10 @@ func (s *dekService) Initialize(ctx context.Context) error {
 		// Pass necessary info to the goroutine to avoid data races on s.info
 		dekToCache := verificationDEK
 		infoVersion := info.Version
+		cacheBaseCtx := context.WithoutCancel(ctx)
 
-		go func(dek []byte, version int, scope string, orgID string) { // Removed id parameter
-			cacheCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		go func(baseCtx context.Context, dek []byte, version int, scope string, orgID string) { // Removed id parameter
+			cacheCtx, cancel := context.WithTimeout(baseCtx, 30*time.Second)
 			defer cancel()
 
 			// Use the already unwrapped DEK from the verification step
@@ -311,7 +312,7 @@ func (s *dekService) Initialize(ctx context.Context) error {
 			} else {
 				s.zLogger.Warn().Err(keyErr).Msg("Failed to generate cache key for pre-caching")
 			}
-		}(dekToCache, infoVersion, scopeSystem, "") // Pass only copies/values needed to the goroutine
+		}(cacheBaseCtx, dekToCache, infoVersion, scopeSystem, "") // Pass only copies/values needed to the goroutine
 	}
 
 	s.zLogger.Info().
