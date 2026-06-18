@@ -28,10 +28,18 @@ jobs:
       - name: Resolve source SHA
         id: source
         shell: bash
+        env:
+          PR_MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          INPUT_SOURCE_SHA: ${{ github.event.inputs.source_sha }}
         run: |
-          SOURCE_SHA="${{ github.event.pull_request.merge_commit_sha || github.event.inputs.source_sha }}"
+          SOURCE_SHA="${PR_MERGE_SHA:-$INPUT_SOURCE_SHA}"
+          SOURCE_SHA="$(echo "$SOURCE_SHA" | tr '[:upper:]' '[:lower:]')"
           if [[ -z "$SOURCE_SHA" ]]; then
             echo "::error::source SHA is required."
+            exit 1
+          fi
+          if ! [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Invalid source SHA."
             exit 1
           fi
           echo "sha=${SOURCE_SHA}" >> "$GITHUB_OUTPUT"
@@ -39,6 +47,9 @@ jobs:
       - name: Dispatch release-orchestrator cascade
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+          SOURCE_REPO: ${{ github.repository }}
+          PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number || 0 }}
         run: |
           if [[ -z "$GH_TOKEN" ]]; then
             echo "::error::GH_PAT is required to dispatch shared module cascade."
@@ -49,6 +60,6 @@ jobs:
             --method POST \
             -f event_type="shared-go-module-merged" \
             -f client_payload[module]="lib-crypto" \
-            -f client_payload[repo]="${{ github.repository }}" \
-            -f client_payload[sourceSha]="${{ steps.source.outputs.sha }}" \
-            -F client_payload[pullRequest]="${{ github.event.pull_request.number || 0 }}"
+            -f client_payload[repo]="${SOURCE_REPO}" \
+            -f client_payload[sourceSha]="${SOURCE_SHA}" \
+            -F client_payload[pullRequest]="${PULL_REQUEST_NUMBER}"
