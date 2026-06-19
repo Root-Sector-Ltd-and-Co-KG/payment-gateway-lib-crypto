@@ -1,9 +1,0 @@
-name: Git Policy
-
-on:
-  pull_request:
-  push:
-
-jobs:
-  git-policy:
-    uses: Root-Sector-Ltd-and-Co-KG/payment-gateway-local-dev/.github/workflows/git-policy.yml@main
