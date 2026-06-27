@@ -82,3 +82,4 @@ jobs:
           name: lib-crypto-security-report-${{ github.run_id }}
           path: trivy-security-report.json
           if-no-files-found: ignore
+          retention-days: 3

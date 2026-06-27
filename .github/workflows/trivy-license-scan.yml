@@ -40,3 +40,4 @@ jobs:
           name: trivy-license-report-${{ github.run_id }}
           path: trivy-license-report.json
           if-no-files-found: ignore
+          retention-days: 3
