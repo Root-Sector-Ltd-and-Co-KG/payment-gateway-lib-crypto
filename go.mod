@@ -1,6 +1,6 @@
 module github.com/root-sector-ltd-and-co-kg/payment-gateway-lib-crypto
 
-go 1.26.4
+go 1.26.5
 
 require (
 	github.com/google/uuid v1.6.0
