@@ -62,24 +62,36 @@ type EncryptionProcessStatusSummary struct {
 	Error     string  `json:"error,omitempty" bson:"error,omitempty"`
 }
 
+// DetailedError identifies a field-level failure in a background encryption process.
+type DetailedError struct {
+	OrganizationID string    `bson:"organizationId,omitempty" json:"organizationId,omitempty"`
+	Collection     string    `bson:"collection" json:"collection"`
+	DocumentID     string    `bson:"documentId" json:"documentId"`
+	FieldName      string    `bson:"fieldName" json:"fieldName"`
+	Error          string    `bson:"error" json:"error"`
+	Timestamp      time.Time `bson:"timestamp" json:"timestamp"`
+}
+
 // EncryptionProcessDocument represents the full structure stored in the 'encryptionProcesses' collection.
 type EncryptionProcessDocument struct {
-	ID             string    `bson:"_id" json:"id"`
-	OrganizationID string    `bson:"organizationId,omitempty" json:"organizationId,omitempty"` // Optional
-	Scope          string    `bson:"scope,omitempty" json:"scope,omitempty"`                   // "system" or "organization"
-	Operation      string    `bson:"operation" json:"operation"`                               // "encryption", "decryption", "reencryption"
-	Status         string    `bson:"status" json:"status"`                                     // e.g., "starting", "processing", "completed", "failed", "completed_with_errors"
-	Processed      int64     `bson:"processed" json:"processed"`
-	Failed         int64     `bson:"failed" json:"failed"`
-	Total          int64     `bson:"total" json:"total"`
-	Progress       float64   `bson:"progress" json:"progress"` // Stored progress percentage
-	StartedAt      time.Time `bson:"startedAt" json:"startedAt"`
-	UpdatedAt      time.Time `bson:"updatedAt" json:"updatedAt"`
-	CompletedAt    time.Time `bson:"completedAt,omitempty" json:"completedAt,omitempty"`
-	IsProcessing   bool      `bson:"isProcessing" json:"isProcessing"` // Flag indicating active processing
-	IsCompleted    bool      `bson:"isCompleted" json:"isCompleted"`   // Flag indicating completion
-	IsFailed       bool      `bson:"isFailed" json:"isFailed"`         // Flag indicating failure
-	Error          string    `bson:"error,omitempty" json:"error,omitempty"`
+	ID             string          `bson:"_id" json:"id"`
+	OrganizationID string          `bson:"organizationId,omitempty" json:"organizationId,omitempty"` // Optional
+	Scope          string          `bson:"scope,omitempty" json:"scope,omitempty"`                   // "system" or "organization"
+	ScopeID        string          `bson:"scopeId,omitempty" json:"scopeId,omitempty"`
+	Operation      string          `bson:"operation" json:"operation"` // "encryption", "decryption", "reencryption"
+	Status         string          `bson:"status" json:"status"`       // e.g., "starting", "processing", "completed", "failed", "completed_with_errors"
+	Processed      int64           `bson:"processed" json:"processed"`
+	Failed         int64           `bson:"failed" json:"failed"`
+	Total          int64           `bson:"total" json:"total"`
+	Progress       float64         `bson:"progress" json:"progress"` // Stored progress percentage
+	StartedAt      time.Time       `bson:"startedAt" json:"startedAt"`
+	UpdatedAt      time.Time       `bson:"updatedAt" json:"updatedAt"`
+	CompletedAt    time.Time       `bson:"completedAt,omitempty" json:"completedAt,omitempty"`
+	IsProcessing   bool            `bson:"isProcessing" json:"isProcessing"` // Flag indicating active processing
+	IsCompleted    bool            `bson:"isCompleted" json:"isCompleted"`   // Flag indicating completion
+	IsFailed       bool            `bson:"isFailed" json:"isFailed"`         // Flag indicating failure
+	Error          string          `bson:"error,omitempty" json:"error,omitempty"`
+	DetailedErrors []DetailedError `bson:"detailedErrors,omitempty" json:"detailedErrors,omitempty"`
 }
 
 // AuditLogConfig represents the audit log configuration
