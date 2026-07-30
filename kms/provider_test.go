@@ -821,99 +821,20 @@ func TestValidateVaultConfig(t *testing.T) {
 	}
 }
 
-// --- TODO: Add Tests for create*Wrapper functions ---
-// These tests would ideally mock the SetConfig call or inspect the configMap.
 // --- Test Cases for NewProvider ---
 
-// Mock Wrapper for testing NewProvider error propagation (optional, complex)
-// type mockWrapper struct {
-// 	wrapping.Wrapper // Embed to satisfy interface easily
-// 	setConfigError error
-// 	encryptError   error
-// 	decryptError   error
-// }
-//
-// func (m *mockWrapper) SetConfig(ctx context.Context, opt ...wrapping.Option) (*wrapping.WrapperConfig, error) {
-// 	if m.setConfigError != nil {
-// 		return nil, m.setConfigError
-// 	}
-// 	return &wrapping.WrapperConfig{}, nil
-// }
-// func (m *mockWrapper) Encrypt(ctx context.Context, plaintext []byte, opt ...wrapping.Option) (*wrapping.BlobInfo, error) {
-// 	return nil, m.encryptError
-// }
-// func (m *mockWrapper) Decrypt(ctx context.Context, in *wrapping.BlobInfo, opt ...wrapping.Option) ([]byte, error) {
-// 	return nil, m.decryptError
-// }
-// func (m *mockWrapper) Type(ctx context.Context) (wrapping.WrapperType, error) {
-// 	return wrapping.WrapperTypeGcpCkms, nil // Example type
-// }
-// func (m *mockWrapper) KeyId(ctx context.Context) (string, error) {
-// 	return "mock-key-id", nil
-// }
-
-func TestNewProvider(t *testing.T) {
-	// Basic valid configs for each type (details don't matter much here, just non-nil)
-	validAWSConfig := &AWSConfig{KeyID: "aws-key", Region: "us-east-1"}
-	validAzureConfig := &AzureConfig{KeyID: "https://a.vault.azure.net/k/b/c", VaultAddress: "https://a.vault.azure.net"}
-	validGCPConfig := &GCPConfig{ResourceName: "projects/p/locations/l/keyRings/r/cryptoKeys/k", Credentials: map[string]interface{}{"credentialsJson": `{"project_id":"p"}`}}
-	validVaultConfig := &VaultConfig{KeyID: "vault-key", VaultAddress: "https://v.example.com"}
-
+func TestNewProviderRejectsMissingOrInvalidProviderConfig(t *testing.T) {
 	tests := []struct {
-		name      string
-		config    Config
-		expectErr bool
-		errSubstr string
+		name        string
+		config      Config
+		errContains []string
 	}{
-		{
-			name: "Valid AWS Provider",
-			config: Config{
-				Type: encTypes.ProviderAWS,
-				AWS:  validAWSConfig,
-			},
-			expectErr: false, // Expect no error *from NewProvider's initial checks*
-		},
-		{
-			name: "Valid Azure Provider",
-			config: Config{
-				Type:  encTypes.ProviderAzure,
-				Azure: validAzureConfig,
-			},
-			expectErr: false, // Expect no error *from NewProvider's initial checks*
-		},
-		{
-			name: "Valid GCP Provider",
-			config: Config{
-				Type: encTypes.ProviderGCP,
-				GCP:  validGCPConfig,
-			},
-			expectErr: false, // Expect no error *from NewProvider's initial checks*
-		},
-		{
-			name: "Valid GCP Provider (No Credentials - ADC)",
-			config: Config{
-				Type: encTypes.ProviderGCP,
-				GCP: &GCPConfig{
-					ResourceName: "projects/p/locations/l/keyRings/r/cryptoKeys/k",
-				},
-			},
-			expectErr: false, // Validation should pass; wrapper setup may still fail if ADC is unavailable
-		},
-		{
-			name: "Valid Vault Provider",
-			config: Config{
-				Type:  encTypes.ProviderVault,
-				Vault: validVaultConfig,
-			},
-			expectErr: false, // Expect no error *from NewProvider's initial checks*
-		},
 		{
 			name: "Unsupported Provider Type",
 			config: Config{
 				Type: "unknown",
 			},
-			expectErr: true,
-			errSubstr: "unsupported KMS provider type",
+			errContains: []string{"unsupported KMS provider type"},
 		},
 		{
 			name: "Missing AWS Config Struct",
@@ -921,8 +842,7 @@ func TestNewProvider(t *testing.T) {
 				Type: encTypes.ProviderAWS,
 				AWS:  nil, // Missing struct
 			},
-			expectErr: true,
-			errSubstr: "AWS configuration is missing",
+			errContains: []string{"AWS configuration is missing"},
 		},
 		{
 			name: "Missing Azure Config Struct",
@@ -930,8 +850,7 @@ func TestNewProvider(t *testing.T) {
 				Type:  encTypes.ProviderAzure,
 				Azure: nil,
 			},
-			expectErr: true,
-			errSubstr: "azure configuration is missing", // Match actual error message case
+			errContains: []string{"azure configuration is missing"},
 		},
 		{
 			name: "Missing GCP Config Struct",
@@ -939,8 +858,7 @@ func TestNewProvider(t *testing.T) {
 				Type: encTypes.ProviderGCP,
 				GCP:  nil,
 			},
-			expectErr: true,
-			errSubstr: "GCP configuration is missing",
+			errContains: []string{"GCP configuration is missing"},
 		},
 		{
 			name: "Missing Vault Config Struct",
@@ -948,8 +866,7 @@ func TestNewProvider(t *testing.T) {
 				Type:  encTypes.ProviderVault,
 				Vault: nil,
 			},
-			expectErr: true,
-			errSubstr: "vault configuration is missing", // Match actual error message case
+			errContains: []string{"vault configuration is missing"},
 		},
 		{
 			name: "Invalid AWS Config (Validation Error)",
@@ -957,8 +874,21 @@ func TestNewProvider(t *testing.T) {
 				Type: encTypes.ProviderAWS,
 				AWS:  &AWSConfig{Region: "us-east-1"}, // Missing KeyID
 			},
-			expectErr: true,
-			errSubstr: "invalid AWS KMS configuration", // Error from NewProvider wrapping validation error
+			errContains: []string{"invalid AWS KMS configuration"},
+		},
+		{
+			name: "Invalid Azure Config (Validation Error)",
+			config: Config{
+				Type: encTypes.ProviderAzure,
+				Azure: &AzureConfig{
+					KeyID:        "https://payments.vault.azure.net/keys/payment-key/version",
+					VaultAddress: "http://payments.vault.azure.net",
+				},
+			},
+			errContains: []string{
+				"invalid Azure Key Vault configuration",
+				"vault address must be a valid Azure Key Vault URL",
+			},
 		},
 		{
 			name: "Invalid GCP Config (Validation Error)",
@@ -966,40 +896,41 @@ func TestNewProvider(t *testing.T) {
 				Type: encTypes.ProviderGCP,
 				GCP:  &GCPConfig{ResourceName: "invalid-format"}, // Invalid ResourceName
 			},
-			expectErr: true,
-			errSubstr: "invalid GCP KMS configuration",
+			errContains: []string{"invalid GCP KMS configuration"},
 		},
-		// Note: Testing error propagation from create*Wrapper requires mocking,
-		// which is complex here. These tests focus on NewProvider's own logic.
+		{
+			name: "Invalid Vault Config (Validation Error)",
+			config: Config{
+				Type:  encTypes.ProviderVault,
+				Vault: &VaultConfig{KeyID: "vault-key"},
+			},
+			errContains: []string{
+				"invalid Vault configuration",
+				"vault address is required",
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// We don't need the provider instance itself, just the error
-			_, err := NewProvider(tt.config)
+			unexpectedFactory := func() wrapping.Wrapper {
+				t.Fatal("NewProvider reached a provider wrapper factory for invalid configuration")
+				return nil
+			}
+			replaceWrapperFactory(t, &newAWSWrapper, unexpectedFactory)
+			replaceWrapperFactory(t, &newAzureWrapper, unexpectedFactory)
+			replaceWrapperFactory(t, &newGCPWrapper, unexpectedFactory)
+			replaceWrapperFactory(t, &newVaultWrapper, unexpectedFactory)
 
-			if tt.expectErr {
-				// If we expect an error (e.g., missing config struct, validation fail)
-				if err == nil {
-					t.Errorf("expected an error but got nil")
-				} else if tt.errSubstr != "" && !strings.Contains(err.Error(), tt.errSubstr) {
-					t.Errorf("expected error containing %q, got %q", tt.errSubstr, err.Error())
+			_, err := NewProvider(tt.config)
+			if err == nil {
+				t.Fatal("NewProvider returned nil error")
+			}
+			for _, want := range tt.errContains {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("NewProvider error = %q, want substring %q", err, want)
 				}
-				// If err is not nil and matches substring (or no substring check), it passes.
-			} else {
-				// If we don't expect an error *from NewProvider's initial checks*
-				// Allow errors that originate from the downstream create*Wrapper calls
-				if err != nil && !(strings.Contains(err.Error(), "failed to configure") || strings.Contains(err.Error(), "failed to create wrapper")) {
-					// Fail only if the error is *not* from the downstream calls
-					t.Errorf("expected no initial config error, but got: %v", err)
-				}
-				// If err is nil or relates to wrapper configuration/creation, the initial part passed.
 			}
 		})
 	}
 }
-
-// For now, we focus on validation and NewProvider logic.
-
-// --- TODO: Add Tests for NewProvider function ---
-// These tests would check error handling for missing sub-configs and error propagation.

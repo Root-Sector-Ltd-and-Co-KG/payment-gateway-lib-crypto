@@ -309,49 +309,90 @@ func TestCredentialManagerTransformationFailureDoesNotMutateConfig(t *testing.T)
 			},
 		},
 	}
-
-	for _, operation := range operations {
-		t.Run(operation.name, func(t *testing.T) {
-			transformations := 0
-			transform := func(data string) (string, error) {
-				transformations++
-				if transformations == 2 {
-					return "", injectedErr
-				}
-				return "transformed-" + data, nil
-			}
-			manager := &credentialManager{
-				encryptor: fakeEncryptor{
-					encrypt: transform,
-					decrypt: transform,
-				},
-			}
-			credentials := &encTypes.KMSCredentials{
+	providers := []struct {
+		name     string
+		provider encTypes.ProviderType
+		value    encTypes.KMSCredentials
+		failAt   int
+	}{
+		{
+			name:     "AWS",
+			provider: encTypes.ProviderAWS,
+			value: encTypes.KMSCredentials{
 				AccessKeyID:     "original-access-key",
 				SecretAccessKey: "original-secret-key",
 				SessionToken:    "original-session-token",
-			}
-			originalPointer := credentials
-			originalValue := *credentials
-			config := &encTypes.EncryptionConfig{
-				Provider:    encTypes.ProviderAWS,
-				Credentials: credentials,
-			}
+			},
+			failAt: 2,
+		},
+		{
+			name:     "Azure",
+			provider: encTypes.ProviderAzure,
+			value: encTypes.KMSCredentials{
+				TenantID:     "original-tenant-id",
+				ClientID:     "original-client-id",
+				ClientSecret: "original-client-secret",
+			},
+			failAt: 2,
+		},
+		{
+			name:     "GCP",
+			provider: encTypes.ProviderGCP,
+			value: encTypes.KMSCredentials{
+				CredentialsJSON: `{"project_id":"original-project"}`,
+			},
+			failAt: 1,
+		},
+		{
+			name:     "Vault",
+			provider: encTypes.ProviderVault,
+			value: encTypes.KMSCredentials{
+				Token: "original-vault-token",
+			},
+			failAt: 1,
+		},
+	}
 
-			err := operation.run(manager, config)
-			if !errors.Is(err, injectedErr) {
-				t.Fatalf("%s credentials error = %v, want %v", operation.name, err, injectedErr)
-			}
-			if transformations != 2 {
-				t.Errorf("transformations = %d, want 2", transformations)
-			}
-			if config.Credentials != originalPointer {
-				t.Fatalf("credentials pointer changed from %p to %p", originalPointer, config.Credentials)
-			}
-			if !reflect.DeepEqual(*config.Credentials, originalValue) {
-				t.Errorf("credentials = %+v, want unchanged %+v", *config.Credentials, originalValue)
-			}
-		})
+	for _, operation := range operations {
+		for _, provider := range providers {
+			t.Run(operation.name+"/"+provider.name, func(t *testing.T) {
+				transformations := 0
+				transform := func(data string) (string, error) {
+					transformations++
+					if transformations == provider.failAt {
+						return "", injectedErr
+					}
+					return "transformed-" + data, nil
+				}
+				manager := &credentialManager{
+					encryptor: fakeEncryptor{
+						encrypt: transform,
+						decrypt: transform,
+					},
+				}
+				credentials := provider.value
+				originalPointer := &credentials
+				originalValue := credentials
+				config := &encTypes.EncryptionConfig{
+					Provider:    provider.provider,
+					Credentials: originalPointer,
+				}
+
+				err := operation.run(manager, config)
+				if !errors.Is(err, injectedErr) {
+					t.Fatalf("%s credentials error = %v, want %v", operation.name, err, injectedErr)
+				}
+				if transformations != provider.failAt {
+					t.Errorf("transformations = %d, want %d", transformations, provider.failAt)
+				}
+				if config.Credentials != originalPointer {
+					t.Fatalf("credentials pointer changed from %p to %p", originalPointer, config.Credentials)
+				}
+				if !reflect.DeepEqual(*config.Credentials, originalValue) {
+					t.Errorf("credentials = %+v, want unchanged %+v", *config.Credentials, originalValue)
+				}
+			})
+		}
 	}
 }
 
