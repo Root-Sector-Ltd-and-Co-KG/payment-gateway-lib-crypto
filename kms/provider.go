@@ -22,6 +22,13 @@ import (
 
 var log = zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr}).With().Timestamp().Logger()
 
+var (
+	newAWSWrapper   = func() wrapping.Wrapper { return awskms.NewWrapper() }
+	newAzureWrapper = func() wrapping.Wrapper { return azurekeyvault.NewWrapper() }
+	newGCPWrapper   = func() wrapping.Wrapper { return gcpckms.NewWrapper() }
+	newVaultWrapper = func() wrapping.Wrapper { return transit.NewWrapper() }
+)
+
 // provider implements the Provider interface
 type provider struct {
 	wrapper         wrapping.Wrapper
@@ -303,7 +310,7 @@ func validateVaultConfig(vaultConfig VaultConfig) error {
 
 // createAWSWrapper creates an AWS KMS wrapper
 func createAWSWrapper(awsConfig AWSConfig) (wrapping.Wrapper, error) {
-	wrapper := awskms.NewWrapper()
+	wrapper := newAWSWrapper()
 
 	// Create config map with AWS KMS specific options
 	configMap := map[string]string{
@@ -347,7 +354,7 @@ func createAWSWrapper(awsConfig AWSConfig) (wrapping.Wrapper, error) {
 
 // createAzureWrapper creates an Azure Key Vault wrapper
 func createAzureWrapper(azureConfig AzureConfig) (wrapping.Wrapper, error) {
-	wrapper := azurekeyvault.NewWrapper()
+	wrapper := newAzureWrapper()
 
 	// Create config map with Azure Key Vault specific options
 	// Example KeyID URL: https://myvault.vault.azure.net/keys/mykey/version
@@ -422,7 +429,7 @@ func createAzureWrapper(azureConfig AzureConfig) (wrapping.Wrapper, error) {
 
 // createGCPWrapper creates a Google Cloud KMS wrapper
 func createGCPWrapper(gcpConfig GCPConfig) (wrapping.Wrapper, error) {
-	wrapper := gcpckms.NewWrapper()
+	wrapper := newGCPWrapper()
 
 	// --- Parse Resource Name ---
 	parts := strings.Split(gcpConfig.ResourceName, "/")
@@ -513,7 +520,7 @@ func createGCPWrapper(gcpConfig GCPConfig) (wrapping.Wrapper, error) {
 
 // createVaultWrapper creates a HashiCorp Vault Transit wrapper
 func createVaultWrapper(vaultConfig VaultConfig) (wrapping.Wrapper, error) {
-	wrapper := transit.NewWrapper()
+	wrapper := newVaultWrapper()
 
 	// Create config map with Vault Transit specific options
 	configMap := map[string]string{
