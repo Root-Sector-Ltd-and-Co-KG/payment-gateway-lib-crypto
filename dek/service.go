@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 	"time"
@@ -73,6 +74,7 @@ type dekService struct {
 	cache         types.Cache             // Changed from cacheStore: Now holds the actual cache instance
 	store         interfaces.DEKStore
 	encryptionKey []byte
+	entropy       io.Reader
 	mu            sync.RWMutex
 	status        *types.DEKStatus
 	initialized   bool
@@ -109,6 +111,7 @@ func NewService(kmsGetter KMSServiceGetter, configGetter interfaces.ConfigGetter
 		store:         store,
 		cache:         dekCache,
 		encryptionKey: encryptionKey,
+		entropy:       rand.Reader,
 		status: &types.DEKStatus{
 			Exists:      false,
 			Active:      false,
@@ -352,7 +355,7 @@ func (s *dekService) generateDEK() ([]byte, error) {
 	const keySize = 32 // 256-bit key
 	key := make([]byte, keySize)
 
-	n, err := rand.Read(key)
+	n, err := io.ReadFull(s.entropy, key)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate random key: %w", err)
 	}

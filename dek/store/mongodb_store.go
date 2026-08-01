@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -24,6 +25,10 @@ const (
 	defaultCacheTTL = 15 * time.Minute
 )
 
+var errDEKVersionConflict = errors.New("DEK version conflict")
+
+type updateOneFunc func(context.Context, string, any, any, ...options.Lister[options.UpdateOneOptions]) (*mongo.UpdateResult, error)
+
 type cacheEntry struct {
 	value     interface{}
 	expiresAt time.Time
@@ -31,9 +36,10 @@ type cacheEntry struct {
 
 // MongoDBStore implements DEK storage using MongoDB
 type MongoDBStore struct {
-	db       *mongo.Database
-	cache    sync.Map
-	cacheTTL time.Duration
+	db        *mongo.Database
+	cache     sync.Map
+	cacheTTL  time.Duration
+	updateOne updateOneFunc
 }
 
 // NewMongoDBStore creates a new MongoDB DEK store
@@ -41,6 +47,9 @@ func NewMongoDBStore(db *mongo.Database) interfaces.DEKStore {
 	return &MongoDBStore{
 		db:       db,
 		cacheTTL: defaultCacheTTL,
+		updateOne: func(ctx context.Context, collection string, filter, update any, opts ...options.Lister[options.UpdateOneOptions]) (*mongo.UpdateResult, error) {
+			return db.Collection(collection).UpdateOne(ctx, filter, update, opts...)
+		},
 	}
 }
 
@@ -102,24 +111,58 @@ func (s *MongoDBStore) StoreDEK(ctx context.Context, info *types.DEKInfo, scope 
 		return fmt.Errorf("invalid scope: %s", scope)
 	}
 
-	// Store DEK in document
-	_, err := s.db.Collection(collection).UpdateOne(
-		ctx,
-		filter,
-		bson.M{
-			"$set": bson.M{
-				"dek":       info,
-				"updatedAt": info.UpdatedAt,
+	cacheKey := s.getCacheKey(scope, orgID)
+	var result *mongo.UpdateResult
+	var err error
+	if info.Version > 1 {
+		if len(info.Versions) == 0 || info.Versions[len(info.Versions)-1].Version != info.Version {
+			return fmt.Errorf("invalid DEK rotation payload for version %d", info.Version)
+		}
+
+		expectedVersion := info.Version - 1
+		filter["dek._id"] = info.Id
+		filter["dek.active"] = true
+		filter["dek.version"] = expectedVersion
+		result, err = s.updateOne(
+			ctx,
+			collection,
+			filter,
+			bson.M{
+				"$set": bson.M{
+					"dek.active":    info.Active,
+					"dek.version":   info.Version,
+					"dek.updatedAt": info.UpdatedAt,
+					"updatedAt":     info.UpdatedAt,
+				},
+				"$push": bson.M{"dek.versions": info.Versions[len(info.Versions)-1]},
 			},
-		},
-		options.UpdateOne().SetUpsert(true),
-	)
+		)
+		if err == nil && (result == nil || result.MatchedCount == 0) {
+			s.cache.Delete(cacheKey)
+			return fmt.Errorf("%w: expected version %d for scope %s/%s", errDEKVersionConflict, expectedVersion, scope, orgID)
+		}
+	} else {
+		result, err = s.updateOne(
+			ctx,
+			collection,
+			filter,
+			bson.M{
+				"$set": bson.M{
+					"dek":       info,
+					"updatedAt": info.UpdatedAt,
+				},
+			},
+			options.UpdateOne().SetUpsert(true),
+		)
+	}
 	if err != nil {
+		if info.Version > 1 {
+			s.cache.Delete(cacheKey)
+		}
 		return fmt.Errorf("failed to store DEK: %w", err)
 	}
 
 	// Update cache with cacheEntry
-	cacheKey := s.getCacheKey(scope, orgID)
 	s.cache.Store(cacheKey, &cacheEntry{
 		value:     info,
 		expiresAt: time.Now().Add(s.cacheTTL),
