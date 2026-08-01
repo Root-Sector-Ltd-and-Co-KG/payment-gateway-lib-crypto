@@ -149,6 +149,50 @@ func dekVersionToFieldVersion(version int) (uint32, error) {
 	return uint32(version), nil
 }
 
+type activeDEKSnapshot struct {
+	version    int
+	fieldValue uint32
+	key        []byte
+}
+
+func (s *fieldService) getActiveDEKSnapshot(ctx context.Context, scope, scopeID string) (*activeDEKSnapshot, error) {
+	dekInfo, err := s.dekService.GetInfo(ctx, scope, scopeID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get DEK info: %w", err)
+	}
+	if dekInfo == nil || !dekInfo.Active {
+		return nil, nil
+	}
+
+	fieldVersion, err := dekVersionToFieldVersion(dekInfo.Version)
+	if err != nil {
+		return nil, fmt.Errorf("invalid active DEK version: %w", err)
+	}
+
+	var activeVersion *types.DEKVersion
+	for i := range dekInfo.Versions {
+		if dekInfo.Versions[i].Version == dekInfo.Version {
+			version := dekInfo.Versions[i]
+			activeVersion = &version
+			break
+		}
+	}
+	if activeVersion == nil {
+		return nil, fmt.Errorf("active DEK version %d not found", dekInfo.Version)
+	}
+
+	key, err := s.dekService.UnwrapDEK(ctx, activeVersion, scope, scopeID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unwrap active DEK version %d: %w", dekInfo.Version, err)
+	}
+
+	return &activeDEKSnapshot{
+		version:    dekInfo.Version,
+		fieldValue: fieldVersion,
+		key:        key,
+	}, nil
+}
+
 func (s *fieldService) logAuditEvent(ctx context.Context, event *types.AuditEvent) bool {
 	if s == nil || s.logger == nil || event == nil {
 		return false
@@ -205,20 +249,20 @@ func (s *fieldService) Encrypt(ctx context.Context, field *types.FieldEncrypted)
 		return nil
 	}
 
-	// Get the current DEK status using scope/ID from context
+	// Get the active DEK version and material from one immutable snapshot.
 	scope, scopeID := GetScopeAndIDFromContext(ctx)
-	dekStatus, err := s.dekService.GetDEKStatus(ctx, scope, scopeID)
+	dekSnapshot, err := s.getActiveDEKSnapshot(ctx, scope, scopeID)
 	if err != nil {
 		if s.logger != nil {
 			auditEvent.Status = audit.StatusFailed
-			auditEvent.Context["error"] = fmt.Sprintf("failed_get_dek_status: %v", err)
+			auditEvent.Context["error"] = fmt.Sprintf("failed_get_active_dek_snapshot: %v", err)
 			s.logAuditEvent(ctx, auditEvent)
 		}
-		return fmt.Errorf("failed to get DEK status for scope %s/%s: %w", scope, scopeID, err)
+		return fmt.Errorf("failed to get active DEK snapshot for scope %s/%s: %w", scope, scopeID, err)
 	}
 
 	// If DEK is not active, operate in plaintext mode
-	if !dekStatus.Active {
+	if dekSnapshot == nil {
 		// Clear any existing encryption fields
 		field.Ciphertext = ""
 		field.IV = ""
@@ -233,16 +277,8 @@ func (s *fieldService) Encrypt(ctx context.Context, field *types.FieldEncrypted)
 	}
 
 	// Set version from the current active DEK version
-	fieldVersion, err := dekVersionToFieldVersion(dekStatus.Version)
-	if err != nil {
-		auditEvent.Status = audit.StatusFailed
-		auditEvent.DEKVersion = dekStatus.Version
-		auditEvent.Context["error"] = fmt.Sprintf("invalid_active_dek_version: %v", err)
-		s.logAuditEvent(ctx, auditEvent)
-		return fmt.Errorf("invalid active DEK version for scope %s/%s: %w", scope, scopeID, err)
-	}
-	field.Version = fieldVersion
-	auditEvent.DEKVersion = dekStatus.Version
+	field.Version = dekSnapshot.fieldValue
+	auditEvent.DEKVersion = dekSnapshot.version
 
 	// Additional authenticated data (AAD) includes version for integrity
 	aad, err := s.buildAAD(ctx, field.Version)
@@ -257,19 +293,8 @@ func (s *fieldService) Encrypt(ctx context.Context, field *types.FieldEncrypted)
 		return fmt.Errorf("failed to build AAD for encryption: %w", err)
 	}
 
-	// Get active DEK using scope/ID from context
-	dek, dekErr := s.dekService.GetActiveDEK(ctx, scope, scopeID)
-	if dekErr != nil {
-		if s.logger != nil {
-			auditEvent.Status = audit.StatusFailed
-			auditEvent.Context["error"] = fmt.Sprintf("failed_get_active_dek: %v", dekErr)
-			s.logAuditEvent(ctx, auditEvent)
-		}
-		return fmt.Errorf("failed to get active DEK: %w", dekErr)
-	}
-
 	// If no key is returned, keep plaintext
-	if dek == nil {
+	if dekSnapshot.key == nil {
 		// Clear any existing encryption fields
 		field.Ciphertext = ""
 		field.IV = ""
@@ -284,7 +309,7 @@ func (s *fieldService) Encrypt(ctx context.Context, field *types.FieldEncrypted)
 	}
 
 	// Create AES cipher
-	block, cipherErr := aes.NewCipher(dek)
+	block, cipherErr := aes.NewCipher(dekSnapshot.key)
 	if cipherErr != nil {
 		if s.logger != nil {
 			auditEvent.Status = audit.StatusFailed
@@ -546,20 +571,20 @@ func (s *fieldService) EncryptSearchable(ctx context.Context, field *types.Field
 		return nil
 	}
 
-	// Get DEK status using scope/ID from context
+	// Get the active DEK version and material from one immutable snapshot.
 	scope, scopeID := GetScopeAndIDFromContext(ctx)
-	systemStatus, err := s.dekService.GetDEKStatus(ctx, scope, scopeID)
+	dekSnapshot, err := s.getActiveDEKSnapshot(ctx, scope, scopeID)
 	if err != nil {
 		if s.logger != nil {
 			auditEvent.Status = audit.StatusFailed
-			auditEvent.Context["error"] = err.Error()
+			auditEvent.Context["error"] = fmt.Sprintf("failed_get_active_dek_snapshot: %v", err)
 			s.logAuditEvent(ctx, auditEvent)
 		}
-		return fmt.Errorf("failed to get DEK status for scope %s/%s: %w", scope, scopeID, err)
+		return fmt.Errorf("failed to get active DEK snapshot for scope %s/%s: %w", scope, scopeID, err)
 	}
 
 	// If no active DEK, operate in plaintext mode
-	if !systemStatus.Active {
+	if dekSnapshot == nil {
 		// Clear any existing encryption fields
 		field.Ciphertext = ""
 		field.IV = ""
@@ -576,16 +601,8 @@ func (s *fieldService) EncryptSearchable(ctx context.Context, field *types.Field
 	}
 
 	// Set the field version to the current DEK version
-	fieldVersion, err := dekVersionToFieldVersion(systemStatus.Version)
-	if err != nil {
-		auditEvent.Status = audit.StatusFailed
-		auditEvent.DEKVersion = systemStatus.Version
-		auditEvent.Context["error"] = fmt.Sprintf("invalid_active_dek_version: %v", err)
-		s.logAuditEvent(ctx, auditEvent)
-		return fmt.Errorf("invalid active DEK version for scope %s/%s: %w", scope, scopeID, err)
-	}
-	field.Version = fieldVersion
-	auditEvent.DEKVersion = systemStatus.Version
+	field.Version = dekSnapshot.fieldValue
+	auditEvent.DEKVersion = dekSnapshot.version
 
 	// Additional authenticated data (AAD) includes version for integrity
 	aad, err := s.buildAAD(ctx, field.Version)
@@ -600,19 +617,8 @@ func (s *fieldService) EncryptSearchable(ctx context.Context, field *types.Field
 		return fmt.Errorf("failed to build AAD for searchable encryption: %w", err)
 	}
 
-	// Get DEK for encryption using scope/ID from context
-	dek, dekErr := s.dekService.GetActiveDEK(ctx, scope, scopeID)
-	if dekErr != nil {
-		if s.logger != nil {
-			auditEvent.Status = audit.StatusFailed
-			auditEvent.Context["error"] = fmt.Sprintf("failed_get_active_dek: %v", dekErr)
-			s.logAuditEvent(ctx, auditEvent)
-		}
-		return fmt.Errorf("failed to get active DEK: %w", dekErr)
-	}
-
 	// Create AES cipher
-	block, cipherErr := aes.NewCipher(dek)
+	block, cipherErr := aes.NewCipher(dekSnapshot.key)
 	if cipherErr != nil {
 		if s.logger != nil {
 			auditEvent.Status = audit.StatusFailed
