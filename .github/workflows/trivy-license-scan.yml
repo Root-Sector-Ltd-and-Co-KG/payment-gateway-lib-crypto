@@ -18,10 +18,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout source
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Set up Trivy
-        uses: aquasecurity/setup-trivy@v0.2.6
+        uses: aquasecurity/setup-trivy@3fb12ec12f41e471780db15c232d5dd185dcb514 # v0.2.6
 
       - name: Run Trivy license scan
         run: |
@@ -35,7 +35,7 @@ jobs:
 
       - name: Upload license scan report
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: trivy-license-report-${{ github.run_id }}
           path: trivy-license-report.json
